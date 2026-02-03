@@ -2,6 +2,9 @@ import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 import os
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+import uuid
 
 # Initialize both models
 # buffalo_l: High Precision
@@ -187,3 +190,62 @@ def save_face(img, box, filename_base, index, output_folder="faces"):
     face_img = img[y1:y2, x1:x2]
     save_path = os.path.join(output_folder, f"{filename_base}_face_{index}.jpg")
     cv2.imwrite(save_path, face_img)
+
+qdrant_client = QdrantClient(url="http://localhost:6333")
+COLLECTION_NAME = "faces"
+
+def ensure_collection_exists():
+    try:
+        collections = qdrant_client.get_collections()
+        if not any(c.name == COLLECTION_NAME for c in collections.collections):
+            qdrant_client.create_collection(
+                collection_name=COLLECTION_NAME,
+                vectors_config=models.VectorParams(size=512, distance=models.Distance.COSINE),
+            )
+    except Exception as e:
+        print(f"Qdrant Error: {e}")
+
+def index_extracted_face(img, box, original_filepath, face_index):
+    try:
+        # Crop the face
+        y1, y2 = max(0, box[1]), min(img.shape[0], box[3])
+        x1, x2 = max(0, box[0]), min(img.shape[1], box[2])
+        face_img = img[y1:y2, x1:x2]
+        
+        # Get embedding
+        embedding = get_embedding(face_img, "l")
+        if embedding is None:
+            embedding = get_embedding(face_img, "s")
+            
+        if embedding is not None:
+            ensure_collection_exists()
+            
+            metadata = {
+                "original_filename": os.path.basename(original_filepath),
+                "full_path": original_filepath,
+                "face_index": face_index,
+                "bbox": [int(b) for b in box]
+            }
+            
+            point_id = str(uuid.uuid4())
+            qdrant_client.upsert(
+                collection_name=COLLECTION_NAME,
+                points=[
+                    models.PointStruct(
+                        id=point_id,
+                        vector=embedding.tolist(),
+                        payload=metadata
+                    )
+                ]
+            )
+            return True
+    except Exception as e:
+        print(f"Failed to index face: {e}")
+    return False
+
+def configure_qdrant(url, port):
+    global qdrant_client
+    try:
+        qdrant_client = QdrantClient(url=url, port=int(port))
+    except Exception as e:
+        print(f"Failed to configure Qdrant client: {e}")

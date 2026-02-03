@@ -72,10 +72,24 @@ class FaceExtractorApp:
             self.config.read(self.config_file)
             self.input_folder = self.config.get("Settings", "input_folder", fallback=os.getcwd())
             self.output_folder = self.config.get("Settings", "output_folder", fallback=os.path.join(os.getcwd(), "faces"))
+            
+            if self.config.has_option("Settings", "qdrant_url") and self.config.has_option("Settings", "qdrant_port"):
+                self.qdrant_url = self.config.get("Settings", "qdrant_url")
+                self.qdrant_port = self.config.get("Settings", "qdrant_port")
+            else:
+                messagebox.showerror("Configuration Error", "Qdrant URL or Port missing in config.ini.\nPlease update settings.")
+                self.qdrant_url = "http://localhost"
+                self.qdrant_port = "6333"
         else:
             self.input_folder = os.getcwd()
             self.output_folder = os.path.join(os.getcwd(), "faces")
-            self.config["Settings"] = {"input_folder": self.input_folder, "output_folder": self.output_folder}
+            self.qdrant_url = "http://localhost"
+            self.qdrant_port = "6333"
+            self.config["Settings"] = {"input_folder": self.input_folder, "output_folder": self.output_folder, "qdrant_url": self.qdrant_url, "qdrant_port": self.qdrant_port}
+            with open(self.config_file, "w") as configfile:
+                self.config.write(configfile)
+        
+        face_recognition.configure_qdrant(self.qdrant_url, self.qdrant_port)
 
     def select_image(self):
         self.filepath = filedialog.askopenfilename(
@@ -163,6 +177,7 @@ class FaceExtractorApp:
         box = self.face_boxes[face_index]
         original_filename = os.path.splitext(os.path.basename(self.filepath))[0]
         face_recognition.save_face(self.cv2_image, box, original_filename, face_index, self.output_folder)
+        face_recognition.index_extracted_face(self.cv2_image, box, self.filepath, face_index)
         
         self.draw_boxes(highlight_index=face_index) # Redraw with green box
 
@@ -268,7 +283,7 @@ class FaceExtractorApp:
     def open_settings(self):
         self.settings_win = tk.Toplevel(self.root)
         self.settings_win.title("Settings")
-        self.settings_win.geometry("500x200")
+        self.settings_win.geometry("500x350")
         
         # Input Folder
         tk.Label(self.settings_win, text="Input Folder:").pack(anchor="w", padx=10)
@@ -288,6 +303,18 @@ class FaceExtractorApp:
         self.output_entry.pack(side="left", fill="x", expand=True)
         tk.Button(frame_out, text="Browse", command=self.browse_output).pack(side="right", padx=5)
         
+        # Qdrant URL
+        tk.Label(self.settings_win, text="Qdrant URL:").pack(anchor="w", padx=10)
+        self.qdrant_url_entry = tk.Entry(self.settings_win)
+        self.qdrant_url_entry.insert(0, self.qdrant_url)
+        self.qdrant_url_entry.pack(fill="x", padx=10, pady=5)
+
+        # Qdrant Port
+        tk.Label(self.settings_win, text="Qdrant Port:").pack(anchor="w", padx=10)
+        self.qdrant_port_entry = tk.Entry(self.settings_win)
+        self.qdrant_port_entry.insert(0, self.qdrant_port)
+        self.qdrant_port_entry.pack(fill="x", padx=10, pady=5)
+        
         tk.Button(self.settings_win, text="Save", command=self.save_settings).pack(pady=20)
 
     def browse_input(self):
@@ -305,13 +332,18 @@ class FaceExtractorApp:
     def save_settings(self):
         self.input_folder = self.input_entry.get()
         self.output_folder = self.output_entry.get()
+        self.qdrant_url = self.qdrant_url_entry.get()
+        self.qdrant_port = self.qdrant_port_entry.get()
 
         if not self.config.has_section("Settings"):
             self.config.add_section("Settings")
         self.config.set("Settings", "input_folder", self.input_folder)
         self.config.set("Settings", "output_folder", self.output_folder)
+        self.config.set("Settings", "qdrant_url", self.qdrant_url)
+        self.config.set("Settings", "qdrant_port", self.qdrant_port)
         with open(self.config_file, "w") as configfile:
             self.config.write(configfile)
+        face_recognition.configure_qdrant(self.qdrant_url, self.qdrant_port)
         self.settings_win.destroy()
 
 if __name__ == "__main__":
