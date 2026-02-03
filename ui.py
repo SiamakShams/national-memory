@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw
 import g
 import os
+import configparser
 
 class FaceExtractorApp:
     def __init__(self, root):
@@ -17,8 +18,8 @@ class FaceExtractorApp:
         self.cv2_image = None
 
         # Settings
-        self.input_folder = os.getcwd()
-        self.output_folder = os.path.join(os.getcwd(), "faces")
+        self.config_file = "config.ini"
+        self.load_settings()
 
         # Create Menu Bar
         self.menu_bar = tk.Menu(self.root)
@@ -64,6 +65,17 @@ class FaceExtractorApp:
         
         self.status_label = tk.Label(self.main_frame, text="", fg="blue")
         self.status_label.grid(row=2, column=0, pady=5, sticky="ew")
+
+    def load_settings(self):
+        self.config = configparser.ConfigParser()
+        if os.path.exists(self.config_file):
+            self.config.read(self.config_file)
+            self.input_folder = self.config.get("Settings", "input_folder", fallback=os.getcwd())
+            self.output_folder = self.config.get("Settings", "output_folder", fallback=os.path.join(os.getcwd(), "faces"))
+        else:
+            self.input_folder = os.getcwd()
+            self.output_folder = os.path.join(os.getcwd(), "faces")
+            self.config["Settings"] = {"input_folder": self.input_folder, "output_folder": self.output_folder}
 
     def select_image(self):
         self.filepath = filedialog.askopenfilename(
@@ -226,6 +238,13 @@ class FaceExtractorApp:
     def save_settings(self):
         self.input_folder = self.input_entry.get()
         self.output_folder = self.output_entry.get()
+
+        if not self.config.has_section("Settings"):
+            self.config.add_section("Settings")
+        self.config.set("Settings", "input_folder", self.input_folder)
+        self.config.set("Settings", "output_folder", self.output_folder)
+        with open(self.config_file, "w") as configfile:
+            self.config.write(configfile)
         self.settings_win.destroy()
 
 if __name__ == "__main__":
