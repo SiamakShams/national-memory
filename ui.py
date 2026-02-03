@@ -28,12 +28,9 @@ class FaceExtractorApp:
         # File Menu
         self.file_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="File", menu=self.file_menu)
+        self.file_menu.add_command(label="Settings", command=self.open_settings)
+        self.file_menu.add_separator()
         self.file_menu.add_command(label="Exit", command=self.root.quit)
-
-        # Configuration Menu
-        self.config_menu = tk.Menu(self.menu_bar, tearoff=0)
-        self.menu_bar.add_cascade(label="Configuration", menu=self.config_menu)
-        self.config_menu.add_command(label="Settings", command=self.open_settings)
 
         # Faces Menu
         self.faces_menu = tk.Menu(self.menu_bar, tearoff=0)
@@ -253,7 +250,6 @@ class FaceExtractorApp:
         self.faces_menu.add_command(label="View faces", command=self.view_faces)
         self.faces_menu.add_command(label="Match faces", command=self.match_faces)
         self.faces_menu.add_command(label="Find a face", command=self.find_face)
-        self.faces_menu.add_separator()
 
         if self.face_boxes:
             self.faces_menu.add_command(label="Show Full Image", command=self.display_image)
