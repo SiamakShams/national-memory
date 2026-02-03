@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw
-import g
+import main
 import os
 import configparser
 
@@ -124,7 +124,7 @@ class FaceExtractorApp:
         self.status_label.config(text="Detecting faces...")
         self.root.update_idletasks()
 
-        self.cv2_image, self.face_boxes = g.get_face_boxes(self.filepath)
+        self.cv2_image, self.face_boxes = main.get_face_boxes(self.filepath)
 
         if not self.face_boxes:
             messagebox.showinfo("Info", "No faces detected.")
@@ -162,7 +162,7 @@ class FaceExtractorApp:
         
         box = self.face_boxes[face_index]
         original_filename = os.path.splitext(os.path.basename(self.filepath))[0]
-        g.save_face(self.cv2_image, box, original_filename, face_index, self.output_folder)
+        main.save_face(self.cv2_image, box, original_filename, face_index, self.output_folder)
         
         self.draw_boxes(highlight_index=face_index) # Redraw with green box
 
