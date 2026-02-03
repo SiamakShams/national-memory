@@ -1,0 +1,17 @@
+# Python virtual environment
+.venv/
+venv/
+
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build, packaging and distribution artifacts
+build/
+dist/
+*.egg-info/
+
+# Version control
+.git/

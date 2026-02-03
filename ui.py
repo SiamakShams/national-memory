@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw
 import face_recognition
 import os
+import dotenv # Added for loading .env file
 import configparser
 
 class FaceExtractorApp:
@@ -10,6 +11,7 @@ class FaceExtractorApp:
         self.root = root
         self.root.title("Face Extractor")
         self.root.minsize(800, 600)
+        self.center_window(self.root) # Center the main window on screen
 
         self.filepath = None
         self.original_image = None
@@ -64,29 +66,39 @@ class FaceExtractorApp:
         self.status_label.grid(row=2, column=0, pady=5, sticky="ew")
 
     def load_settings(self):
+        # Load environment variables from .env file
+        dotenv.load_dotenv()
+
         self.config = configparser.ConfigParser()
         if os.path.exists(self.config_file):
             self.config.read(self.config_file)
-            self.input_folder = self.config.get("Settings", "input_folder", fallback=os.getcwd())
-            self.output_folder = self.config.get("Settings", "output_folder", fallback=os.path.join(os.getcwd(), "faces"))
-            
-            if self.config.has_option("Settings", "qdrant_url") and self.config.has_option("Settings", "qdrant_port"):
-                self.qdrant_url = self.config.get("Settings", "qdrant_url")
-                self.qdrant_port = self.config.get("Settings", "qdrant_port")
-            else:
-                messagebox.showerror("Configuration Error", "Qdrant URL or Port missing in config.ini.\nPlease update settings.")
-                self.qdrant_url = "http://localhost"
-                self.qdrant_port = "6333"
         else:
-            self.input_folder = os.getcwd()
-            self.output_folder = os.path.join(os.getcwd(), "faces")
-            self.qdrant_url = "http://localhost"
-            self.qdrant_port = "6333"
-            self.config["Settings"] = {"input_folder": self.input_folder, "output_folder": self.output_folder, "qdrant_url": self.qdrant_url, "qdrant_port": self.qdrant_port}
-            with open(self.config_file, "w") as configfile:
-                self.config.write(configfile)
-        
-        face_recognition.configure_qdrant(self.qdrant_url, self.qdrant_port)
+            # Ensure 'Settings' section exists if config.ini is new
+            if not self.config.has_section("Settings"):
+                self.config.add_section("Settings")
+
+        # Load input_folder and output_folder from config.ini, with fallbacks
+        self.input_folder = self.config.get("Settings", "input_folder", fallback=os.getcwd())
+        self.output_folder = self.config.get("Settings", "output_folder", fallback=os.path.join(os.getcwd(), "faces"))
+
+        # Construct postgres_dsn using environment variables, with fallbacks
+        # Prioritize environment variables from .env (loaded by dotenv)
+        pg_user = os.getenv("POSTGRES_USER", "postgres")
+        pg_password = os.getenv("POSTGRES_PASSWORD", "postgres") # Use a safe default if not found
+        pg_host = os.getenv("POSTGRES_HOST", "localhost")
+        pg_port = os.getenv("POSTGRES_PORT", "5433") # Default to 5432 as per docker-compose.yml
+        pg_db = os.getenv("POSTGRES_DB", "national_memory")
+
+        self.postgres_dsn = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+
+        # Update config.ini with current values if it was just created or values were missing
+        self.config.set("Settings", "input_folder", self.input_folder)
+        self.config.set("Settings", "output_folder", self.output_folder)
+        with open(self.config_file, "w") as configfile:
+            self.config.write(configfile)
+
+        face_recognition.configure_postgres(self.postgres_dsn)
+        self.face_match_threshold = float(self.config.get("Settings", "face_match_threshold", fallback=0.4))
 
     def select_image(self):
         self.filepath = filedialog.askopenfilename(
@@ -123,7 +135,23 @@ class FaceExtractorApp:
         self.image_label.image = photo
         
     def on_resize(self, event):
-        self.display_image()
+        # This check prevents recursive calls during initial setup
+        # and ensures display_image is only called when the label has valid dimensions.
+        if self.image_label.winfo_width() > 1 and self.image_label.winfo_height() > 1:
+            self.display_image()
+
+    def center_window(self, win):
+        win.update_idletasks()  # Ensure window dimensions are calculated
+
+        screen_width = win.winfo_screenwidth()
+        screen_height = win.winfo_screenheight()
+        
+        win_width = win.winfo_width()
+        win_height = win.winfo_height()
+
+        center_x = (screen_width // 2) - (win_width // 2)
+        center_y = (screen_height // 2) - (win_height // 2)
+        win.geometry(f'+{center_x}+{center_y}')
 
     def extract_faces(self):
         if not self.filepath:
@@ -201,6 +229,7 @@ class FaceExtractorApp:
         match_win = tk.Toplevel(self.root)
         match_win.title("Match Faces")
         match_win.geometry("500x200")
+        self.center_window(match_win) # Center the window
 
         tk.Label(match_win, text="Select Face 1:").grid(row=0, column=0, padx=10, pady=10, sticky="e")
         entry1 = tk.Entry(match_win, width=40)
@@ -218,32 +247,89 @@ class FaceExtractorApp:
             if path1 and path2:
                 result = face_recognition.match_faces(path1, path2)
                 messagebox.showinfo("Match Result", result)
+                match_win.grab_release() # Release grab before destroying
+                match_win.destroy()
 
         tk.Button(match_win, text="Match", command=perform_match).grid(row=2, column=1, pady=20)
+        match_win.lift() # Bring to front
+        self.root.wait_window(match_win) # Pause main window until this is closed
 
     def find_face(self):
-        find_win = tk.Toplevel(self.root)
-        find_win.title("Find Face in Crowd")
-        find_win.geometry("500x200")
+            find_win = tk.Toplevel(self.root)
+            find_win.title("Find Face in Crowd")
+            find_win.geometry("500x200")
+            self.center_window(find_win) 
+            find_win.transient(self.root)
+            find_win.grab_set()
+            find_win.focus_set()
 
-        tk.Label(find_win, text="Target Face:").grid(row=0, column=0, padx=10, pady=10, sticky="e")
-        entry_target = tk.Entry(find_win, width=40)
-        entry_target.grid(row=0, column=1, padx=10, pady=10)
-        tk.Button(find_win, text="Browse", command=lambda: self.browse_file_for_entry(entry_target)).grid(row=0, column=2, padx=10, pady=10)
+            tk.Label(find_win, text="Target Face:").grid(row=0, column=0, padx=10, pady=10, sticky="e")
+            entry_target = tk.Entry(find_win, width=40)
+            entry_target.grid(row=0, column=1, padx=10, pady=10)
+            tk.Button(find_win, text="Browse", command=lambda: self.browse_file_for_entry(entry_target)).grid(row=0, column=2, padx=10, pady=10)
 
-        tk.Label(find_win, text="Crowd Image:").grid(row=1, column=0, padx=10, pady=10, sticky="e")
-        entry_crowd = tk.Entry(find_win, width=40)
-        entry_crowd.grid(row=1, column=1, padx=10, pady=10)
-        tk.Button(find_win, text="Browse", command=lambda: self.browse_file_for_entry(entry_crowd)).grid(row=1, column=2, padx=10, pady=10)
+            tk.Label(find_win, text="Crowd Image:").grid(row=1, column=0, padx=10, pady=10, sticky="e")
+            entry_crowd = tk.Entry(find_win, width=40)
+            entry_crowd.grid(row=1, column=1, padx=10, pady=10)
+            tk.Button(find_win, text="Browse", command=lambda: self.browse_file_for_entry(entry_crowd)).grid(row=1, column=2, padx=10, pady=10)
 
-        def perform_search():
-            target = entry_target.get()
-            crowd = entry_crowd.get()
-            if target and crowd:
-                result = face_recognition.find_face_in_crowd(target, crowd)
-                messagebox.showinfo("Search Result", result)
+            def perform_search():
+                target = entry_target.get()
+                crowd = entry_crowd.get()
+                
+                # Get the threshold from the entry, or use the global setting if empty/invalid
+                override_threshold_str = threshold_entry.get()
+                current_threshold = self.face_match_threshold
+                result_text = ""
+                result_image_path = None
+                if target and crowd:
+                    try:
+                        if override_threshold_str:
+                            current_threshold = float(override_threshold_str)
+                        if not (0.0 <= current_threshold <= 1.0):
+                            raise ValueError("Threshold must be between 0.0 and 1.0")
+                    except ValueError as e:
+                        messagebox.showerror("Invalid Threshold", f"Please enter a valid number between 0.0 and 1.0 for threshold. Error: {e}")
+                        return
 
-        tk.Button(find_win, text="Find", command=perform_search).grid(row=2, column=1, pady=20)
+                    result_text, result_image_path = face_recognition.find_face_in_crowd(
+                        target, crowd, threshold=current_threshold
+                    )
+                    
+                    # 2. Handle the "temp" folder logic
+                    if result_image_path and os.path.exists(result_image_path):
+                        temp_dir = os.path.join(os.getcwd(), "temp")
+                        if not os.path.exists(temp_dir):
+                            os.makedirs(temp_dir)
+                        
+                        # Define new path in temp folder
+                        new_path = os.path.join(temp_dir, os.path.basename(result_image_path))
+                        
+                        # Move the file from root to temp
+                        try:
+                            os.replace(result_image_path, new_path)
+                            result_image_path = new_path # Update path for the display method
+                        except Exception as e:
+                            print(f"Error moving file: {e}")
+
+                    # 3. Show message and update the main application screen
+                    messagebox.showinfo("Search Result", result_text)
+                    
+                    if result_image_path and os.path.exists(result_image_path):
+                        self.display_result_image(result_image_path)
+                    
+                    find_win.grab_release()
+                    find_win.destroy()
+
+            # Add threshold entry to the dialog
+            tk.Label(find_win, text="Override Threshold:").grid(row=2, column=0, padx=10, pady=10, sticky="e")
+            threshold_entry = tk.Entry(find_win, width=10)
+            threshold_entry.insert(0, str(self.face_match_threshold)) # Default to current global threshold
+            threshold_entry.grid(row=2, column=1, padx=10, pady=10, sticky="w")
+
+            tk.Button(find_win, text="Find", command=perform_search).grid(row=3, column=1, pady=20)
+            find_win.lift()
+            self.root.wait_window(find_win)
 
     def update_faces_menu(self):
         self.faces_menu.delete(0, tk.END)
@@ -276,10 +362,29 @@ class FaceExtractorApp:
         self.image_label.image = photo
         self.status_label.config(text=f"Displaying Face {index + 1}")
 
+    def display_result_image(self, image_path):
+        """Loads and displays a result image in the main application window."""
+        if not os.path.exists(image_path):
+            messagebox.showerror("Error", f"Result image not found: {image_path}")
+            return
+        
+        self.filepath = image_path # Set filepath to the result image
+        self.original_image = Image.open(self.filepath).convert("RGB")
+        self.image_with_boxes = self.original_image.copy() # No boxes initially, but keeps consistent
+        self.face_boxes = [] # Clear face boxes as this is a result image
+        self.display_image()
+        self.status_label.config(text=f"Displayed result: {os.path.basename(image_path)}")
+
     def open_settings(self):
         self.settings_win = tk.Toplevel(self.root)
         self.settings_win.title("Settings")
         self.settings_win.geometry("500x350")
+        self.center_window(self.settings_win) # Center the window
+        # Make the settings window modal and on top
+        self.settings_win.transient(self.root)
+        self.settings_win.grab_set()
+        self.settings_win.focus_set()
+        self.settings_win.lift()
         
         # Input Folder
         tk.Label(self.settings_win, text="Input Folder:").pack(anchor="w", padx=10)
@@ -299,21 +404,28 @@ class FaceExtractorApp:
         self.output_entry.pack(side="left", fill="x", expand=True)
         tk.Button(frame_out, text="Browse", command=self.browse_output).pack(side="right", padx=5)
         
-        # Qdrant URL
-        tk.Label(self.settings_win, text="Qdrant URL:").pack(anchor="w", padx=10)
-        self.qdrant_url_entry = tk.Entry(self.settings_win)
-        self.qdrant_url_entry.insert(0, self.qdrant_url)
-        self.qdrant_url_entry.pack(fill="x", padx=10, pady=5)
+        # Postgres DSN
+        tk.Label(self.settings_win, text="Postgres DSN:").pack(anchor="w", padx=10)
+        # Display the resolved DSN, but make it read-only as it's controlled by .env
+        # This prevents saving sensitive credentials from the UI to config.ini.
+        self.dsn_entry = tk.Entry(self.settings_win, state='readonly')
+        self.dsn_entry.insert(0, self.postgres_dsn)
+        self.dsn_entry.pack(fill="x", padx=10, pady=5)
 
-        # Qdrant Port
-        tk.Label(self.settings_win, text="Qdrant Port:").pack(anchor="w", padx=10)
-        self.qdrant_port_entry = tk.Entry(self.settings_win)
-        self.qdrant_port_entry.insert(0, self.qdrant_port)
-        self.qdrant_port_entry.pack(fill="x", padx=10, pady=5)
+        # Face Match Threshold
+        tk.Label(self.settings_win, text="Face Match Threshold:").pack(anchor="w", padx=10)
+        self.threshold_entry = tk.Entry(self.settings_win)
+        self.threshold_entry.insert(0, str(self.face_match_threshold))
+        self.threshold_entry.pack(fill="x", padx=10, pady=5)
         
         tk.Button(self.settings_win, text="Save", command=self.save_settings).pack(pady=20)
 
     def browse_input(self):
+        # Make the settings window modal and on top
+        self.settings_win.transient(self.root)
+        self.settings_win.grab_set()
+        self.settings_win.focus_set()
+        self.settings_win.lift()
         d = filedialog.askdirectory(initialdir=self.input_folder)
         if d:
             self.input_entry.delete(0, tk.END)
@@ -321,25 +433,36 @@ class FaceExtractorApp:
 
     def browse_output(self):
         d = filedialog.askdirectory(initialdir=self.output_folder)
+        # Make the settings window modal and on top
+        self.settings_win.transient(self.root)
+        self.settings_win.grab_set()
+        self.settings_win.focus_set()
         if d:
             self.output_entry.delete(0, tk.END)
             self.output_entry.insert(0, d)
 
     def save_settings(self):
+        # Release grab and destroy window
+        self.settings_win.grab_release()
+        self.settings_win.destroy()
+
+        # Save settings logic (moved from open_settings)
         self.input_folder = self.input_entry.get()
         self.output_folder = self.output_entry.get()
-        self.qdrant_url = self.qdrant_url_entry.get()
-        self.qdrant_port = self.qdrant_port_entry.get()
-
+        self.face_match_threshold = float(self.threshold_entry.get()) # Get updated threshold
         if not self.config.has_section("Settings"):
             self.config.add_section("Settings")
         self.config.set("Settings", "input_folder", self.input_folder)
         self.config.set("Settings", "output_folder", self.output_folder)
-        self.config.set("Settings", "qdrant_url", self.qdrant_url)
-        self.config.set("Settings", "qdrant_port", self.qdrant_port)
+        self.config.set("Settings", "face_match_threshold", str(self.face_match_threshold))
         with open(self.config_file, "w") as configfile:
             self.config.write(configfile)
-        face_recognition.configure_qdrant(self.qdrant_url, self.qdrant_port)
+        # Release grab and destroy window
+        self.settings_win.grab_release()
+        self.settings_win.destroy()
+        # Reconfigure postgres with potentially new DSN (though ideally from .env)
+        # This line was moved from the end of open_settings to here.
+        face_recognition.configure_postgres(self.postgres_dsn)
         self.settings_win.destroy()
 
 if __name__ == "__main__":
