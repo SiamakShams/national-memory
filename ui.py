@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw
-import main
+import face_recognition
 import os
 import configparser
 
@@ -38,7 +38,7 @@ class FaceExtractorApp:
         # Faces Menu
         self.faces_menu = tk.Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Faces", menu=self.faces_menu)
-        self.faces_menu.add_command(label="No faces detected", state="disabled")
+        self.update_faces_menu()
 
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
@@ -124,7 +124,7 @@ class FaceExtractorApp:
         self.status_label.config(text="Detecting faces...")
         self.root.update_idletasks()
 
-        self.cv2_image, self.face_boxes = main.get_face_boxes(self.filepath)
+        self.cv2_image, self.face_boxes = face_recognition.get_face_boxes(self.filepath)
 
         if not self.face_boxes:
             messagebox.showinfo("Info", "No faces detected.")
@@ -162,18 +162,85 @@ class FaceExtractorApp:
         
         box = self.face_boxes[face_index]
         original_filename = os.path.splitext(os.path.basename(self.filepath))[0]
-        main.save_face(self.cv2_image, box, original_filename, face_index, self.output_folder)
+        face_recognition.save_face(self.cv2_image, box, original_filename, face_index, self.output_folder)
         
         self.draw_boxes(highlight_index=face_index) # Redraw with green box
 
         # Schedule the next face extraction
         self.root.after(500, self.extract_and_save_one_face, face_index + 1)
 
+    def view_faces(self):
+        if os.path.exists(self.output_folder):
+            os.startfile(self.output_folder)
+        else:
+            messagebox.showinfo("Info", "Output folder not found.")
+
+    def browse_file_for_entry(self, entry_widget):
+        filename = filedialog.askopenfilename(
+            initialdir=self.input_folder,
+            title="Select Image",
+            filetypes=(("Image files", "*.jpg *.jpeg *.png"), ("All files", "*.*"))
+        )
+        if filename:
+            entry_widget.delete(0, tk.END)
+            entry_widget.insert(0, filename)
+
+    def match_faces(self):
+        match_win = tk.Toplevel(self.root)
+        match_win.title("Match Faces")
+        match_win.geometry("500x200")
+
+        tk.Label(match_win, text="Select Face 1:").grid(row=0, column=0, padx=10, pady=10, sticky="e")
+        entry1 = tk.Entry(match_win, width=40)
+        entry1.grid(row=0, column=1, padx=10, pady=10)
+        tk.Button(match_win, text="Browse", command=lambda: self.browse_file_for_entry(entry1)).grid(row=0, column=2, padx=10, pady=10)
+
+        tk.Label(match_win, text="Select Face 2:").grid(row=1, column=0, padx=10, pady=10, sticky="e")
+        entry2 = tk.Entry(match_win, width=40)
+        entry2.grid(row=1, column=1, padx=10, pady=10)
+        tk.Button(match_win, text="Browse", command=lambda: self.browse_file_for_entry(entry2)).grid(row=1, column=2, padx=10, pady=10)
+
+        def perform_match():
+            path1 = entry1.get()
+            path2 = entry2.get()
+            if path1 and path2:
+                result = face_recognition.match_faces(path1, path2)
+                messagebox.showinfo("Match Result", result)
+
+        tk.Button(match_win, text="Match", command=perform_match).grid(row=2, column=1, pady=20)
+
+    def find_face(self):
+        find_win = tk.Toplevel(self.root)
+        find_win.title("Find Face in Crowd")
+        find_win.geometry("500x200")
+
+        tk.Label(find_win, text="Target Face:").grid(row=0, column=0, padx=10, pady=10, sticky="e")
+        entry_target = tk.Entry(find_win, width=40)
+        entry_target.grid(row=0, column=1, padx=10, pady=10)
+        tk.Button(find_win, text="Browse", command=lambda: self.browse_file_for_entry(entry_target)).grid(row=0, column=2, padx=10, pady=10)
+
+        tk.Label(find_win, text="Crowd Image:").grid(row=1, column=0, padx=10, pady=10, sticky="e")
+        entry_crowd = tk.Entry(find_win, width=40)
+        entry_crowd.grid(row=1, column=1, padx=10, pady=10)
+        tk.Button(find_win, text="Browse", command=lambda: self.browse_file_for_entry(entry_crowd)).grid(row=1, column=2, padx=10, pady=10)
+
+        def perform_search():
+            target = entry_target.get()
+            crowd = entry_crowd.get()
+            if target and crowd:
+                result = face_recognition.find_face_in_crowd(target, crowd)
+                messagebox.showinfo("Search Result", result)
+
+        tk.Button(find_win, text="Find", command=perform_search).grid(row=2, column=1, pady=20)
+
     def update_faces_menu(self):
         self.faces_menu.delete(0, tk.END)
-        if not self.face_boxes:
-            self.faces_menu.add_command(label="No faces detected", state="disabled")
-        else:
+        self.faces_menu.add_command(label="View faces", command=self.view_faces)
+        self.faces_menu.add_command(label="Match faces", command=self.match_faces)
+        self.faces_menu.add_command(label="Find a face", command=self.find_face)
+        self.faces_menu.add_separator()
+
+        if self.face_boxes:
             self.faces_menu.add_command(label="Show Full Image", command=self.display_image)
             self.faces_menu.add_separator()
             for i, box in enumerate(self.face_boxes):
